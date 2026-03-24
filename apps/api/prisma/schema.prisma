@@ -1,0 +1,373 @@
+// CreativeBase Prisma Schema — CB-005, CB-009, CB-018
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+enum UserRole            { VISITOR CREATOR CONTRACTOR ADMIN }
+enum AccountStatus       { ACTIVE SUSPENDED BANNED PENDING_VERIFICATION }
+enum AvailabilityStatus  { AVAILABLE BUSY OPEN_TO_ENQUIRIES }
+enum VerificationStatus  { NOT_SUBMITTED PENDING APPROVED REJECTED }
+enum SubscriptionTier    { BASIC PRO }
+enum SubscriptionStatus  { ACTIVE PAST_DUE CANCELLED TRIALING }
+enum ContractorPlanType  { PAY_PER_UNLOCK MONTHLY_PASS ANNUAL_PASS }
+enum PortfolioItemType   { IMAGE VIDEO_EMBED AUDIO_EMBED PDF }
+enum ReviewStatus        { PUBLISHED FLAGGED REMOVED }
+enum AdFormat            { SPONSORED_PROFILE BANNER SIDEBAR NEWSLETTER }
+enum AdStatus            { ACTIVE PAUSED ENDED SCHEDULED }
+
+model User {
+  id             String        @id @default(cuid())
+  email          String        @unique
+  emailVerified  Boolean       @default(false)
+  passwordHash   String?
+  role           UserRole      @default(VISITOR)
+  status         AccountStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  lastLoginAt    DateTime?
+  refreshTokens      RefreshToken[]
+  creatorProfile     CreatorProfile?
+  contractorAccount  ContractorAccount?
+  auditLogs          AuditLog[]
+  notifications      Notification[]
+  @@index([email]) @@index([role]) @@index([status])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  token     String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  userAgent String?
+  ipAddress String?
+  @@index([userId]) @@index([token])
+  @@map("refresh_tokens")
+}
+
+model VerificationToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  type      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  @@index([token]) @@index([userId])
+  @@map("verification_tokens")
+}
+
+model CreatorProfile {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username             String             @unique
+  displayName          String
+  bio                  String?            @db.VarChar(500)
+  city                 String?
+  country              String             @default("ZA")
+  availability         AvailabilityStatus @default(AVAILABLE)
+  rateAmount           Decimal?           @db.Decimal(10,2)
+  rateCurrency         String             @default("ZAR")
+  rateLabel            String?
+  verificationStatus   VerificationStatus @default(NOT_SUBMITTED)
+  verifiedAt           DateTime?
+  verificationDocUrl   String?
+  verificationRejectionReason String?
+  verificationAttempts Int                @default(0)
+  isVerified           Boolean            @default(false)
+  subscriptionTier     SubscriptionTier?
+  subscriptionStatus   SubscriptionStatus?
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  trialEndsAt          DateTime?
+  totalProfileViews    Int                @default(0)
+  totalSearchImpressions Int              @default(0)
+  totalUnlocks         Int                @default(0)
+  averageRating        Decimal?           @db.Decimal(3,2)
+  totalReviews         Int                @default(0)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  disciplines          CreatorDiscipline[]
+  portfolioItems       PortfolioItem[]
+  socialLinks          SocialLink[]
+  skillTags            CreatorSkillTag[]
+  reviews              Review[]
+  profileViews         ProfileView[]
+  searchImpressions    SearchImpression[]
+  unlocks              Unlock[]
+  shortlistEntries     ShortlistEntry[]
+  analyticsDaily       CreatorAnalyticsDaily[]
+  @@index([username]) @@index([city]) @@index([availability]) @@index([isVerified]) @@index([subscriptionStatus])
+  @@map("creator_profiles")
+}
+
+model Discipline {
+  id          String             @id @default(cuid())
+  slug        String             @unique
+  name        String
+  description String?
+  sortOrder   Int                @default(0)
+  creators    CreatorDiscipline[]
+  @@map("disciplines")
+}
+
+model CreatorDiscipline {
+  creatorProfileId String
+  disciplineId     String
+  isPrimary        Boolean        @default(false)
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  discipline       Discipline     @relation(fields: [disciplineId], references: [id])
+  @@id([creatorProfileId, disciplineId])
+  @@map("creator_disciplines")
+}
+
+model PortfolioItem {
+  id               String            @id @default(cuid())
+  creatorProfileId String
+  creatorProfile   CreatorProfile    @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  type             PortfolioItemType
+  title            String?
+  description      String?
+  s3Key            String?
+  cdnUrl           String?
+  embedUrl         String?
+  thumbnailCdnUrl  String?
+  sortOrder        Int               @default(0)
+  fileSizeBytes    Int?
+  mimeType         String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  @@index([creatorProfileId, sortOrder])
+  @@map("portfolio_items")
+}
+
+model SocialLink {
+  id               String         @id @default(cuid())
+  creatorProfileId String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  platform         String
+  url              String
+  sortOrder        Int            @default(0)
+  @@unique([creatorProfileId, platform])
+  @@map("social_links")
+}
+
+model SkillTag {
+  id       String            @id @default(cuid())
+  slug     String            @unique
+  name     String
+  creators CreatorSkillTag[]
+  @@index([slug])
+  @@map("skill_tags")
+}
+
+model CreatorSkillTag {
+  creatorProfileId String
+  skillTagId       String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  skillTag         SkillTag       @relation(fields: [skillTagId], references: [id])
+  @@id([creatorProfileId, skillTagId])
+  @@map("creator_skill_tags")
+}
+
+model ContractorAccount {
+  id                   String             @id @default(cuid())
+  userId               String             @unique
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName          String
+  companyLogoUrl       String?
+  industry             String?
+  website              String?
+  billingEmail         String
+  planType             ContractorPlanType @default(PAY_PER_UNLOCK)
+  creditBalance        Int                @default(0)
+  stripeCustomerId     String?            @unique
+  stripeSubscriptionId String?            @unique
+  passExpiresAt        DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  unlocks              Unlock[]
+  shortlists           Shortlist[]
+  reviews              Review[]
+  teamMembers          ContractorTeamMember[]
+  creditTransactions   CreditTransaction[]
+  @@index([planType])
+  @@map("contractor_accounts")
+}
+
+model ContractorTeamMember {
+  id                  String            @id @default(cuid())
+  contractorAccountId String
+  contractorAccount   ContractorAccount @relation(fields: [contractorAccountId], references: [id], onDelete: Cascade)
+  userId              String
+  role                String            @default("MEMBER")
+  invitedAt           DateTime          @default(now())
+  acceptedAt          DateTime?
+  @@unique([contractorAccountId, userId])
+  @@map("contractor_team_members")
+}
+
+model CreditTransaction {
+  id                  String            @id @default(cuid())
+  contractorAccountId String
+  contractorAccount   ContractorAccount @relation(fields: [contractorAccountId], references: [id], onDelete: Cascade)
+  amount              Int
+  reason              String
+  stripePaymentId     String?
+  adminUserId         String?
+  createdAt           DateTime          @default(now())
+  @@index([contractorAccountId])
+  @@map("credit_transactions")
+}
+
+model Unlock {
+  id                  String            @id @default(cuid())
+  contractorAccountId String
+  contractorAccount   ContractorAccount @relation(fields: [contractorAccountId], references: [id], onDelete: Cascade)
+  creatorProfileId    String
+  creatorProfile      CreatorProfile    @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  creditCost          Int               @default(1)
+  unlockedAt          DateTime          @default(now())
+  @@unique([contractorAccountId, creatorProfileId])
+  @@index([contractorAccountId]) @@index([creatorProfileId])
+  @@map("unlocks")
+}
+
+model Shortlist {
+  id                  String            @id @default(cuid())
+  contractorAccountId String
+  contractorAccount   ContractorAccount @relation(fields: [contractorAccountId], references: [id], onDelete: Cascade)
+  name                String
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  entries             ShortlistEntry[]
+  @@index([contractorAccountId])
+  @@map("shortlists")
+}
+
+model ShortlistEntry {
+  id               String         @id @default(cuid())
+  shortlistId      String
+  shortlist        Shortlist      @relation(fields: [shortlistId], references: [id], onDelete: Cascade)
+  creatorProfileId String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  addedAt          DateTime       @default(now())
+  @@unique([shortlistId, creatorProfileId])
+  @@map("shortlist_entries")
+}
+
+model Review {
+  id                  String            @id @default(cuid())
+  contractorAccountId String
+  contractorAccount   ContractorAccount @relation(fields: [contractorAccountId], references: [id], onDelete: Cascade)
+  creatorProfileId    String
+  creatorProfile      CreatorProfile    @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  rating              Int
+  comment             String            @db.VarChar(500)
+  creatorReply        String?           @db.VarChar(500)
+  creatorReplyAt      DateTime?
+  status              ReviewStatus      @default(PUBLISHED)
+  flaggedAt           DateTime?
+  flagReason          String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  @@unique([contractorAccountId, creatorProfileId])
+  @@index([creatorProfileId]) @@index([status])
+  @@map("reviews")
+}
+
+model ProfileView {
+  id               String         @id @default(cuid())
+  creatorProfileId String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  viewerType       String
+  sessionHash      String
+  viewedAt         DateTime       @default(now())
+  @@index([creatorProfileId, viewedAt])
+  @@map("profile_views")
+}
+
+model SearchImpression {
+  id               String         @id @default(cuid())
+  creatorProfileId String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  keyword          String?
+  sessionHash      String
+  impressedAt      DateTime       @default(now())
+  @@index([creatorProfileId, impressedAt])
+  @@map("search_impressions")
+}
+
+model CreatorAnalyticsDaily {
+  id               String         @id @default(cuid())
+  creatorProfileId String
+  creatorProfile   CreatorProfile @relation(fields: [creatorProfileId], references: [id], onDelete: Cascade)
+  date             DateTime       @db.Date
+  profileViews     Int            @default(0)
+  searchImpressions Int           @default(0)
+  unlocks          Int            @default(0)
+  @@unique([creatorProfileId, date])
+  @@index([creatorProfileId, date])
+  @@map("creator_analytics_daily")
+}
+
+model AdCampaign {
+  id               String    @id @default(cuid())
+  advertiserName   String
+  format           AdFormat
+  status           AdStatus  @default(SCHEDULED)
+  targetDiscipline String?
+  targetCity       String?
+  imageUrl         String?
+  clickUrl         String?
+  headline         String?   @db.VarChar(60)
+  creatorProfileId String?
+  startDate        DateTime
+  endDate          DateTime
+  totalImpressions Int       @default(0)
+  totalClicks      Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  @@index([status, startDate, endDate]) @@index([format])
+  @@map("ad_campaigns")
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  isRead    Boolean  @default(false)
+  readAt    DateTime?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  @@index([userId, isRead]) @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model PlatformConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+  @@map("platform_config")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  @@index([userId]) @@index([action]) @@index([createdAt])
+  @@map("audit_logs")
+}
